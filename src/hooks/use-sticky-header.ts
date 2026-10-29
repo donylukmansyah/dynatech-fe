@@ -1,0 +1,105 @@
+import { useLayoutEffect, useState } from 'react'
+import { flushSync } from 'react-dom'
+
+export type HeaderVisibility =
+  'transparent' | 'visible' | 'hidden' | 'hidden-initial'
+
+// Butuh scroll ke atas yang konsisten sebelum muncul
+const UPWARD_REVEAL_THRESHOLD = 32
+
+type UseStickyHeaderOptions = {
+  topOffset?: number
+  tolerance?: number
+  paused?: boolean
+}
+
+export function useStickyHeader(
+  options: UseStickyHeaderOptions = {},
+): HeaderVisibility {
+  const { topOffset = 12, tolerance = 8, paused = false } = options
+  const [visibility, setVisibility] = useState<HeaderVisibility>('transparent')
+
+  useLayoutEffect(() => {
+    if (paused) return
+
+    setVisibility((current) =>
+      window.scrollY <= topOffset
+        ? 'transparent'
+        : current === 'transparent'
+          ? 'hidden-initial'
+          : current,
+    )
+    let previousScrollY = window.scrollY
+    let previousDirection = 0
+    let directionDistance = 0
+    let animationFrame: number | undefined
+    let hasRevealedAfterScroll = false
+
+    const update = () => {
+      animationFrame = undefined
+
+      const currentScrollY = Math.max(window.scrollY, 0)
+      const diff = currentScrollY - previousScrollY
+      previousScrollY = currentScrollY
+
+      if (currentScrollY <= topOffset) {
+        previousDirection = 0
+        directionDistance = 0
+        hasRevealedAfterScroll = false
+        setVisibility('transparent')
+        return
+      }
+
+      if (diff === 0) {
+        return
+      }
+
+      const direction = Math.sign(diff)
+
+      if (direction !== previousDirection) {
+        directionDistance = 0
+      }
+
+      directionDistance += Math.abs(diff)
+      previousDirection = direction
+
+      if (directionDistance < tolerance) {
+        return
+      }
+
+      if (direction < 0) {
+        if (directionDistance >= UPWARD_REVEAL_THRESHOLD) {
+          hasRevealedAfterScroll = true
+          setVisibility('visible')
+        }
+      } else if (hasRevealedAfterScroll || currentScrollY > 140) {
+        setVisibility(hasRevealedAfterScroll ? 'hidden' : 'hidden-initial')
+      }
+    }
+
+    const handleScroll = () => {
+      if (window.scrollY <= topOffset) {
+        if (animationFrame !== undefined) {
+          window.cancelAnimationFrame(animationFrame)
+        }
+        // Restorasi scroll router harus selesai sebelum paint
+        flushSync(update)
+      } else if (animationFrame === undefined) {
+        animationFrame = window.requestAnimationFrame(update)
+      }
+    }
+
+    window.addEventListener('scroll', handleScroll, { passive: true })
+    update()
+
+    return () => {
+      window.removeEventListener('scroll', handleScroll)
+
+      if (animationFrame !== undefined) {
+        window.cancelAnimationFrame(animationFrame)
+      }
+    }
+  }, [topOffset, tolerance, paused])
+
+  return visibility
+}
